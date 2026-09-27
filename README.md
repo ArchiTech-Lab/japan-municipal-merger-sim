@@ -19,6 +19,7 @@ X の作り方は4通り（A〜D）を切り替えられる。
 
 - **A〜Dの切替**（案ごとにXmaxの決め方・統合回数が変わる）
 - 合併後の市町村境・都道府県境の可視化（合併で一体化した範囲が単色の塊として見える）
+- 都道府県別の「市町村の数」「生産年齢人口（2050年）」「面積」の棒グラフ（県の色で塗り、再生に合わせて変化）
 - 陸で隣接しない離島の合併（海越しの点線で結んだ橋。下記「隣接の定義」参照）
 - 拡大・縮小・移動、市町村名の表示、統合ログ
 - 収斂過程の再生（速度調整・mp4/webm録画）
@@ -40,6 +41,7 @@ X の作り方は4通り（A〜D）を切り替えられる。
 | `src/build_x.py` | IPSS推計・総務省課税統計 → 市町村ごとのP・I（Xの元データ） |
 | `src/build_borders.py` | 隣接ペアごとの共有境界線 → `docs/gappei_borders.js`（県境の太線描画用） |
 | `src/build_sea_links.py` | 陸で隣接しない離島どうしを最小全域木で橋渡し → `docs/gappei_sea_links.js` |
+| `src/build_area.py` | 市区町村ごとの面積（元のN03から楕円体上で計算）→ `docs/gappei_area.js` |
 | `src/dbf_reader.py` / `src/shp_polygon.py` | SHP/DBFの最小リーダ（依存を減らすため自前） |
 
 依存は **shapely / openpyxl** のみ。geopandas・GDALは使わない。
@@ -50,6 +52,7 @@ python3 src/build_real.py       # N03 → 市町村の形・隣接
 python3 src/build_x.py          # IPSS・総務省統計 → P・I
 python3 src/build_borders.py    # 隣接ペアの共有境界線
 python3 src/build_sea_links.py  # 離島どうしの橋（約60秒）
+python3 src/build_area.py       # 市区町村の面積（約30秒）
 ```
 
 ## モデル

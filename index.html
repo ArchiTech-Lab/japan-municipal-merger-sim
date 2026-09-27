@@ -50,9 +50,20 @@ input[type=range]{width:100%}
 #below .card{margin:0}
 .wide{grid-column:1/-1}
 .sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:4px;border:1px solid var(--line)}
-#prefLegend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px}
-#prefLegend .pf{display:flex;align-items:center;gap:2px;color:var(--fg)}
-#prefLegend .pf.dead{color:var(--dim);text-decoration:line-through}
+#prefCharts{overflow-x:auto}
+#prefCharts .pc-in{min-width:620px}
+.pc-head{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;margin:8px 0 3px}
+.pc-head b{color:var(--hi);font-weight:600}
+.pc-head span{color:var(--dim);font-size:10.5px}
+.pc-bars{display:flex;align-items:flex-end;gap:2px;height:92px;border-bottom:1px solid var(--line);
+  background:repeating-linear-gradient(to top,transparent 0 22px,rgba(255,255,255,.05) 22px 23px)}
+.pc-bars>div{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch}
+.pc-bars i{display:block;border-radius:2px 2px 0 0;transition:height .12s linear}
+.pc-bars.pc-num{padding-top:12px}
+.pc-bars em{font-style:normal;font-size:9.5px;line-height:1;color:var(--fg);text-align:center;margin-bottom:2px;white-space:nowrap}
+.pc-lab{display:flex;gap:2px;margin-top:4px}
+.pc-lab span{flex:1;min-width:0;writing-mode:vertical-rl;font-size:10.5px;line-height:1;height:38px;color:var(--fg);overflow:hidden}
+.pc-lab span.dead{color:var(--dim);text-decoration:line-through}
 #log{height:360px;overflow-y:auto;background:#0d1319;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:11px;line-height:1.55}
 #log div{border-bottom:1px dashed var(--line);padding:2px 0}
 #log div.warn{color:var(--warn);font-weight:600}
@@ -109,8 +120,10 @@ input[type=range]{width:100%}
 
 <div id="below">
   <div class="card wide">
-    <h2>都道府県（消滅した県は取り消し線）</h2>
-    <div id="prefLegend"></div>
+    <h2>都道府県別の推移（その時点の所属で集計・消滅した県は取り消し線）</h2>
+    <div id="prefCharts"></div>
+    <div class="note" style="margin-top:6px">棒の色＝地図上の都道府県の色。縦軸の上端は再生中に動かさない（全フレームの最大値）ので、棒の高さの変化がそのまま増減を表す。
+      生産年齢人口はIPSSの2050年推計で、推計の無い福島浜通り13市町村は0として足している。面積は国土数値情報N03から楕円体上で計算（北方領土を含む。<code>src/build_area.py</code>）。</div>
   </div>
 
   <div class="card">
@@ -174,6 +187,7 @@ input[type=range]{width:100%}
 <script src="gappei_real_data.js"></script>
 <script src="gappei_borders.js"></script>
 <script src="gappei_sea_links.js"></script>
+<script src="gappei_area.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const D=GAPPEI_REAL_DATA, XMETA=D.xmeta, N=D.munis.length;
@@ -344,7 +358,7 @@ function simulate(scheme){
   }
   // 各フレームの県の生死を先に計算しておく（ログ・凡例用）
   const prefAlive=frames.map(fr=>{const s=new Set(); for(let i=0;i<N;i++) s.add(D.munis[fr[i]].pref); return s;});
-  return {xmax,X0,frames,events,un:new Set(un),prefAlive,survivors:alive.size,merges:events.length,unreach:un.size};
+  return {xmax,X0,frames,events,un:new Set(un),prefAlive,pstat:prefStats(frames),survivors:alive.size,merges:events.length,unreach:un.size};
 }
 
 /* ===== 表示（キャンバスはステージいっぱい・地図は中でfit） ===== */
@@ -472,13 +486,53 @@ function hover(e){
 }
 
 /* ===== 凡例・ログ・HUD ===== */
-function buildPrefLegend(aliveSet){
-  const el=$("prefLegend"); el.innerHTML="";
-  D.prefs.forEach((name,p)=>{
-    const sp=document.createElement("span"); sp.className="pf"+(aliveSet.has(p)?"":" dead");
-    sp.innerHTML='<i class="sw" style="background:'+PAL[p]+'"></i>'+name+(aliveSet.has(p)?"":"（消滅）");
-    el.appendChild(sp);
-  });
+/* 都道府県別の棒グラフ：各フレームで「その時点でその県に属する土地」を集計する */
+const PC_DEF=[
+  {key:"cnt", title:"市町村の数", fmt:v=>v.toLocaleString()+"市町村", num:true},  // 終盤は棒が低くなりすぎるので数値も添える
+  {key:"pop", title:"生産年齢人口（2050年）", fmt:v=>(v/1e4).toLocaleString(undefined,{maximumFractionDigits:1})+"万人"},
+  {key:"area",title:"面積", fmt:v=>Math.round(v).toLocaleString()+"km²"},
+];
+const PREF_OF=Int16Array.from(D.munis,m=>m.pref), POP_OF=Float64Array.from(D.munis,m=>m.p2050||0);
+function prefStats(frames){
+  const F=frames.length, st={}, max={};
+  for(const d of PC_DEF){ st[d.key]=new Float64Array(F*N_PREF); max[d.key]=0; }
+  for(let k=0;k<F;k++){
+    const fr=frames[k], o=k*N_PREF;
+    for(let i=0;i<N;i++){
+      const p=o+PREF_OF[fr[i]];
+      if(fr[i]===i) st.cnt[p]++;
+      st.pop[p]+=POP_OF[i]; st.area[p]+=GAPPEI_AREA[i];
+    }
+    for(const d of PC_DEF){ const a=st[d.key]; for(let p=o;p<o+N_PREF;p++) if(a[p]>max[d.key]) max[d.key]=a[p]; }
+  }
+  return {st,max};
+}
+const pcEl={bars:{},top:{},lab:[]};
+(function buildPrefCharts(){
+  const root=$("prefCharts"), inner=document.createElement("div"); inner.className="pc-in";
+  for(const d of PC_DEF){
+    const h=document.createElement("div"); h.className="pc-head";
+    h.innerHTML="<b>"+d.title+"</b>"; const top=document.createElement("span"); h.appendChild(top);
+    const bars=document.createElement("div"); bars.className="pc-bars"+(d.num?" pc-num":"");
+    pcEl.bars[d.key]=D.prefs.map((_,p)=>{
+      const col=document.createElement("div"), b=document.createElement("i"); b.style.background=PAL[p];
+      if(d.num){ b.num=document.createElement("em"); col.appendChild(b.num); }
+      col.appendChild(b); bars.appendChild(col); return b;
+    });
+    pcEl.top[d.key]=top; inner.append(h,bars);
+  }
+  const lab=document.createElement("div"); lab.className="pc-lab";
+  pcEl.lab=D.prefs.map(name=>{ const s=document.createElement("span"); s.textContent=name==="北海道"?name:name.replace(/[都府県]$/,""); lab.appendChild(s); return s; });
+  inner.appendChild(lab); root.appendChild(inner);
+})();
+function updatePrefCharts(){
+  const o=fi*N_PREF, alive=res.prefAlive[fi];
+  for(const d of PC_DEF){
+    const a=res.pstat.st[d.key], mx=res.pstat.max[d.key];
+    pcEl.top[d.key].textContent="縦軸の上端＝"+d.fmt(mx);
+    pcEl.bars[d.key].forEach((b,p)=>{ const v=a[o+p]; b.style.height=(mx?v/mx*100:0)+"%"; b.title=D.prefs[p]+"："+d.fmt(v); if(b.num) b.num.textContent=v||""; });
+  }
+  pcEl.lab.forEach((s,p)=>{ s.classList.toggle("dead",!alive.has(p)); s.title=D.prefs[p]+(alive.has(p)?"":"（消滅）"); });
 }
 function buildLog(){
   const scheme=$("scheme").value, frag=document.createDocumentFragment();
@@ -508,9 +562,9 @@ function updateHud(){
 let logT=null;
 function show(i){
   fi=Math.max(0,Math.min(res.frames.length-1,i)); $("frame").value=fi;
-  redraw(); updateHud();
-  // 都道府県一覧とログはDOMを作り直すので重い。再生中は間引く
-  clearTimeout(logT); logT=setTimeout(()=>{ buildPrefLegend(res.prefAlive[fi]); buildLog(); }, timer?250:0);
+  redraw(); updateHud(); updatePrefCharts();
+  // ログはDOMを作り直すので重い。再生中は間引く（棒グラフは高さを書き換えるだけなので毎フレーム）
+  clearTimeout(logT); logT=setTimeout(buildLog, timer?250:0);
 }
 
 /* ===== 実行・再生 =====
@@ -526,7 +580,7 @@ function tick(now){
   const n=res.frames.length-1;
   const f=Math.min(n, playF0+Math.floor((now-playT0)/msPerFrame()));
   if(f!==fi) show(f);
-  if(f>=n){ const done=playDone; stop(); buildPrefLegend(res.prefAlive[fi]); buildLog(); if(done) done(); return; }
+  if(f>=n){ const done=playDone; stop(); buildLog(); if(done) done(); return; }
   timer=requestAnimationFrame(tick);
 }
 function startPlay(onDone){
