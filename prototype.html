@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>市町村合併シミュレーション（プロトタイプ・合成データ）</title>
+<style>
+:root{--bg:#11161c;--panel:#1a222c;--line:#2c3946;--fg:#e7edf3;--sub:#93a4b5;--acc:#4cc2ff;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.6 -apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif}
+header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1{font-size:15px;margin:0}
+header span{color:var(--sub);font-size:11px}
+#wrap{display:flex;gap:14px;padding:14px;align-items:flex-start;flex-wrap:wrap}
+#side{width:330px;flex:0 0 330px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:12px}
+.card h2{font-size:12px;margin:0 0 8px;color:var(--acc);letter-spacing:.04em}
+label{display:block;font-size:11px;color:var(--sub);margin:8px 0 2px}
+select,input[type=number]{width:100%;background:#0d1319;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:5px 6px;font:inherit}
+input[type=range]{width:100%}
+.row{display:flex;gap:8px}.row>*{flex:1}
+button{background:var(--acc);color:#04121c;border:0;border-radius:6px;padding:8px 10px;font:600 12px inherit;cursor:pointer}
+button.ghost{background:#243140;color:var(--fg)}
+button:disabled{opacity:.45;cursor:default}
+.val{float:right;color:var(--fg);font-variant-numeric:tabular-nums}
+#main{flex:1;min-width:560px}
+canvas{background:#0d1319;border:1px solid var(--line);border-radius:8px;display:block;image-rendering:pixelated}
+#kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.kpi b{display:block;font:600 19px/1.2 inherit;font-variant-numeric:tabular-nums}
+.kpi span{font-size:10px;color:var(--sub)}
+.legend{display:flex;gap:10px;font-size:10.5px;color:var(--sub);margin-top:6px;flex-wrap:wrap;align-items:center}
+.sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px}
+.note{font-size:10.5px;color:var(--sub);line-height:1.5}
+.note b{color:var(--fg)}
+#prefLegend{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:10.5px;margin-top:8px}
+#prefLegend .pf{display:flex;align-items:center;gap:4px;color:var(--fg)}
+#prefLegend .pf.dead{color:var(--sub);text-decoration:line-through}
+#log{height:220px;overflow-y:auto;background:#0d1319;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:11px;line-height:1.55}
+#log div{border-bottom:1px dashed var(--line);padding:2px 0}
+#log div.warn{color:#ffd166;font-weight:600}
+.warnbox{background:#241a10;border:1px solid #6a4a14;color:#ffd166;border-radius:8px;padding:10px 12px;font-size:11.5px;margin-bottom:12px;line-height:1.6}
+</style>
+</head>
+<body>
+<header>
+  <h1>市町村合併シミュレーション（プロトタイプ）</h1>
+  <span>合成データ・単一HTML・外部通信なし ／ 仕様＝<code>gappei_merger_spec.md</code></span>
+</header>
+
+<div id="wrap">
+<div id="side">
+
+  <div class="warnbox">
+    <b>これは合成データによる動作確認用プロトタイプです。</b>実在の市町村・人口・GDPは
+    まだ使っていません。市町村数・都道府県数・X（合成変数）の空間分布は乱数で生成しています。
+    実データ接続は次のステップです。
+  </div>
+
+  <div class="card">
+    <h2>1. 合成データ</h2>
+    <label>市町村数<span class="val" id="vN"></span></label>
+    <input type="range" id="N" min="60" max="320" step="10">
+    <label>初期都道府県数<span class="val" id="vK"></span></label>
+    <input type="range" id="K" min="4" max="14" step="1">
+    <label>乱数シード</label>
+    <input type="number" id="seed" value="7">
+    <div class="row" style="margin-top:8px">
+      <button class="ghost" id="regen">データ再生成</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. 合併ルール（このシミュレーションの前提条件）</h2>
+    <label>Xmax（持続的な行政運営に十分な水準・合成単位）<span class="val" id="vXm"></span></label>
+    <input type="range" id="Xmax" min="50" max="500" step="10">
+    <div class="note" style="margin-top:6px">
+      ① Xが最も低い市町村から処理する（取り残し防止）<br>
+      ② 隣接市町村のうち<b>Xが最も低い方</b>と合併する<br>
+      ③ 全市町村のX≥Xmaxで停止<br>
+      ④ 合併後の主体（都道府県の帰属先）は<b>Xが大きい方</b>＝吸収した側になる
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. 再生</h2>
+    <div class="row"><button id="run">この設定で実行</button><button class="ghost" id="play">▶ 再生</button></div>
+    <label>再生位置<span class="val" id="vF"></span></label>
+    <input type="range" id="frame" min="0" max="0" value="0">
+    <label>再生速度（ms/コマ）<span class="val" id="vSpd"></span></label>
+    <input type="range" id="speed" min="20" max="400" step="10" value="120">
+  </div>
+
+  <div class="card">
+    <h2>4. 統合ログ</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<div id="main">
+  <canvas id="cv" width="640" height="640"></canvas>
+  <div class="legend">
+    <span>塗り色＝現在の帰属都道府県（合併で吸収した側の元の県に塗り替わる）</span>
+    <span>太線＝都道府県境　細線＝市町村（統合後の主体）境</span>
+    <span>○＝X≥Xmax達成　×＝未達　△＝到達不能（撤退）</span>
+  </div>
+  <div id="prefLegend"></div>
+
+  <div id="kpi">
+    <div class="kpi"><b id="k1">–</b><span>生存市町村数</span></div>
+    <div class="kpi"><b id="k2">–</b><span>統合回数</span></div>
+    <div class="kpi"><b id="k3">–</b><span>到達不能（撤退）</span></div>
+    <div class="kpi"><b id="k4">–</b><span>現存都道府県数</span></div>
+  </div>
+
+  <div class="card">
+    <h2 style="color:var(--acc);font-size:12px;margin:0 0 6px">この画面の読み方</h2>
+    <div class="note">
+      各市町村は乱数で作った合成変数X（人口＋税収に相当する架空の1指標）を持つ。Xmaxを下回る市町村のうち
+      <b>Xが最小のもの</b>から処理し、隣接市町村の中で<b>Xが最小の相手</b>と合併させる（弱い者同士を先に
+      合体させ、強い都市に一方的に吸収させない）。合併後の主体は必ずXが大きかった側＝吸収した側になるため、
+      その市町村がもともと属していた都道府県の色が、合併された側のマスに塗り広がっていく。ある都道府県の
+      市町村がすべて他県の主体に吸収されると、その県は地図上から消える（凡例で取り消し線表示）。
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+/* ===== 乱数・空間データ生成 ===== */
+const mul32=a=>()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+const L=100, NG=200, MESH=L/NG;
+const PAL=["#4cc2ff","#ff6b6b","#ffd166","#06d6a0","#c77dff","#f4a261","#a0c4ff","#ef476f","#8ecae6","#ffb4a2","#b5838d","#80ed99","#e9c46a","#90be6d"];
+
+let munis=[], prefSeeds=[], origPref=[], baseX=[], owner=new Int32Array(NG*NG), adjBase=[];
+
+function clamp(v){return Math.max(2,Math.min(L-2,v));}
+
+function gen(seed,nMuni,nPref){
+  const r=mul32(seed>>>0);
+  // 都道府県シード（最小距離を確保しつつ散らす）
+  prefSeeds=[];
+  for(let i=0;i<nPref;i++){
+    let best=null,bd=-1;
+    for(let t=0;t<40;t++){
+      const cand=[clamp(r()*L),clamp(r()*L)];
+      let md=1e18; for(const p of prefSeeds) md=Math.min(md,Math.hypot(cand[0]-p[0],cand[1]-p[1]));
+      if(prefSeeds.length===0) md=1e18;
+      if(md>bd){bd=md;best=cand;}
+    }
+    prefSeeds.push(best);
+  }
+  // 都市核（Xが高くなる場所）を都道府県シードの近くに複数配置
+  const bumps=[];
+  for(const p of prefSeeds) if(r()<0.85) bumps.push([p[0]+ (r()-.5)*6, p[1]+(r()-.5)*6, 260+r()*260, 6+r()*4]);
+  for(let i=0;i<Math.round(nPref*0.6);i++) bumps.push([clamp(r()*L),clamp(r()*L),40+r()*90,3+r()*3]);
+
+  munis=[]; origPref=[]; baseX=[];
+  for(let i=0;i<nMuni;i++){
+    const x=clamp(r()*L), y=clamp(r()*L);
+    munis.push({x,y});
+    let pi=0,pd=1e18;
+    for(let k=0;k<prefSeeds.length;k++){const d=Math.hypot(x-prefSeeds[k][0],y-prefSeeds[k][1]); if(d<pd){pd=d;pi=k;}}
+    origPref.push(pi);
+    let v=18+r()*14;
+    for(const b of bumps){const dx=x-b[0],dy=y-b[1];v+=b[2]*Math.exp(-(dx*dx+dy*dy)/(2*b[3]*b[3]));}
+    v*= (0.55+r()*0.9);
+    baseX.push(Math.max(4,v));
+  }
+  assignOwner();
+}
+
+function assignOwner(){
+  const N=munis.length;
+  owner=new Int32Array(NG*NG);
+  for(let j=0;j<NG;j++)for(let i=0;i<NG;i++){
+    const x=(i+.5)*MESH,y=(j+.5)*MESH; let b=-1,bd=1e18;
+    for(let s=0;s<N;s++){const dx=x-munis[s].x,dy=y-munis[s].y,d=dx*dx+dy*dy;if(d<bd){bd=d;b=s;}}
+    owner[j*NG+i]=b;
+  }
+  const set=Array.from({length:N},()=>new Set());
+  for(let j=0;j<NG;j++)for(let i=0;i<NG;i++){
+    const a=owner[j*NG+i];
+    if(i+1<NG){const b=owner[j*NG+i+1];if(a!==b){set[a].add(b);set[b].add(a);}}
+    if(j+1<NG){const b=owner[(j+1)*NG+i];if(a!==b){set[a].add(b);set[b].add(a);}}
+  }
+  adjBase=set.map(s=>[...s]);
+}
+
+/* ===== シミュレーション（合併ルール①〜④） ===== */
+function simulate(Xmax){
+  const N=munis.length;
+  const par=Array.from({length:N},(_,i)=>i);
+  const find=i=>{while(par[i]!==i){par[i]=par[par[i]];i=par[i];}return i;};
+  const X=Float64Array.from(baseX);
+  const nb=adjBase.map(a=>new Set(a));
+  const alive=new Set(Array.from({length:N},(_,i)=>i)), un=new Set();
+  const events=[], frames=[];
+  const snap=()=>({root:Int32Array.from({length:N},(_,i)=>find(i)),X:Float64Array.from(X)});
+  frames.push(snap());
+  let guard=0;
+  while(guard++<N*3){
+    const cand=[...alive].filter(i=>X[i]<Xmax && !un.has(i)).sort((a,b)=>X[a]-X[b]);
+    if(!cand.length) break;
+    const s=cand[0];
+    let pool=[...nb[s]].map(find).filter(t=>t!==s && alive.has(t));
+    pool=[...new Set(pool)];
+    if(!pool.length){ un.add(s); continue; }
+    pool.sort((a,b)=>X[a]-X[b]);       // ← Xが最も低い隣接市町村と合併（合併ルール②③）
+    const t=pool[0];                    // t は s の候補中では最小だが s 自身は全体最小なので X[t] >= X[s]
+    events.push({s,t,Xs:X[s],Xt:X[t],prefS:origPref[find(s)===s?s:find(s)],prefT:origPref[t]});
+    X[t]+=X[s]; par[s]=t; alive.delete(s);
+    for(const q of nb[s]) if(q!==t) nb[t].add(q);
+    frames.push(snap());
+  }
+  return {N,frames,events,alive:[...alive],un:[...un],survivors:alive.size,merges:events.length,unreach:un.size};
+}
+
+/* ===== 都道府県の生死判定 ===== */
+function prefStatus(frame){
+  const present=new Set();
+  for(let i=0;i<frame.root.length;i++) present.add(origPref[frame.root[i]]);
+  return present;
+}
+
+/* ===== 描画 ===== */
+const off=document.createElement("canvas"); off.width=off.height=NG;
+function hexToRgb(h){h=h.replace('#','');return[parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+const PALRGB=PAL.map(hexToRgb);
+
+function render(cv,res,fi){
+  const ctx=cv.getContext("2d"), oc=off.getContext("2d"), img=oc.createImageData(NG,NG);
+  const fr=res.frames[Math.min(fi,res.frames.length-1)];
+  const prefOfCell=new Int32Array(NG*NG);
+  for(let k=0;k<owner.length;k++){
+    const rt=fr.root[owner[k]], pf=origPref[rt];
+    prefOfCell[k]=pf;
+    const c=PALRGB[pf%PALRGB.length], o=k*4;
+    img.data[o]=c[0];img.data[o+1]=c[1];img.data[o+2]=c[2];img.data[o+3]=255;
+  }
+  // 細線＝市町村（統合後の主体）境、太線＝都道府県境
+  for(let j=0;j<NG;j++)for(let i=0;i<NG;i++){
+    const k=j*NG+i, a=fr.root[owner[k]], ap=prefOfCell[k];
+    if(i+1<NG){ const kk=k+1, b=fr.root[owner[kk]]; if(a!==b){ const o=k*4; img.data[o]=img.data[o+1]=img.data[o+2]=ap!==prefOfCell[kk]?10:70; } }
+    if(j+1<NG){ const kk=k+NG, b=fr.root[owner[kk]]; if(a!==b){ const o=k*4; img.data[o]=img.data[o+1]=img.data[o+2]=ap!==prefOfCell[kk]?10:70; } }
+  }
+  oc.putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=false;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.save();ctx.translate(0,cv.height);ctx.scale(1,-1);
+  ctx.drawImage(off,0,0,cv.width,cv.height);ctx.restore();
+
+  // 太線を上から強調（県境のみ再走査してSVGパスでなくcanvas線描画）
+  const S=cv.width/L;
+  ctx.strokeStyle="#0a0e12"; ctx.lineWidth=1.6;
+  for(let j=0;j<NG;j++)for(let i=0;i<NG;i++){
+    const k=j*NG+i, ap=prefOfCell[k];
+    if(i+1<NG && ap!==prefOfCell[k+1]){ ctx.beginPath(); const x=(i+1)*MESH*S, y1=cv.height-j*MESH*S, y2=cv.height-(j+1)*MESH*S; ctx.moveTo(x,y1); ctx.lineTo(x,y2); ctx.stroke(); }
+    if(j+1<NG && ap!==prefOfCell[k+NG]){ ctx.beginPath(); const y=cv.height-(j+1)*MESH*S, x1=i*MESH*S, x2=(i+1)*MESH*S; ctx.moveTo(x1,y); ctx.lineTo(x2,y); ctx.stroke(); }
+  }
+
+  const px=s=>s.x*S, py=s=>cv.height-s.y*S;
+  const roots=new Set(Array.from(fr.root));
+  for(const rt of roots){
+    const achieved = fr.X[rt] >= res.Xmax;
+    ctx.fillStyle = achieved? "#fff":"#111";
+    ctx.strokeStyle = achieved? "#111":"#fff";
+    ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(px(munis[rt]),py(munis[rt]),3.4,0,6.2832); ctx.fill(); ctx.stroke();
+    if(res.un.includes(rt)){ ctx.strokeStyle="#ffd166"; ctx.beginPath(); ctx.arc(px(munis[rt]),py(munis[rt]),6,0,6.2832); ctx.stroke(); }
+  }
+}
+
+/* ===== UI 配線 ===== */
+const $=id=>document.getElementById(id);
+function sync(){
+  $("vN").textContent=$("N").value+" 市町村"; $("vK").textContent=$("K").value+" 県";
+  $("vXm").textContent=$("Xmax").value; $("vSpd").textContent=$("speed").value+" ms";
+}
+["N","K","Xmax","speed"].forEach(id=>$(id).addEventListener("input",sync));
+
+function buildPrefLegend(initialPrefCount, aliveSet){
+  const el=$("prefLegend"); el.innerHTML="";
+  for(let p=0;p<initialPrefCount;p++){
+    const span=document.createElement("span"); span.className="pf"+(aliveSet.has(p)?"":" dead");
+    span.innerHTML='<i class="sw" style="background:'+PAL[p%PAL.length]+'"></i>県'+(p+1)+(aliveSet.has(p)?"":"（消滅）");
+    el.appendChild(span);
+  }
+}
+
+function logLine(html,warn){
+  const d=document.createElement("div"); if(warn) d.className="warn"; d.innerHTML=html; $("log").appendChild(d);
+}
+
+let res=null, timer=null, prevAlivePref=null;
+
+function regen(){ gen(+$("seed").value, +$("N").value, +$("K").value); }
+
+function run(){
+  res = simulate(+$("Xmax").value);
+  res.Xmax = +$("Xmax").value;
+  $("frame").max = res.frames.length-1; $("frame").value = 0;
+  $("k1").textContent = res.survivors+" / "+res.N;
+  $("k2").textContent = res.merges;
+  $("k3").textContent = res.unreach;
+  const finalPref = prefStatus(res.frames[res.frames.length-1]);
+  $("k4").textContent = finalPref.size+" / "+(+$("K").value);
+  $("log").innerHTML="";
+  prevAlivePref = prefStatus(res.frames[0]);
+  buildPrefLegend(+$("K").value, prevAlivePref);
+  logLine("<b>開始</b>："+res.N+"市町村・"+(+$("K").value)+"県・Xmax="+res.Xmax);
+  draw();
+}
+
+function draw(){
+  const fi=+$("frame").value;
+  $("vF").textContent=fi+" / "+(res.frames.length-1);
+  render($("cv"),res,fi);
+  // ログをその場まで再構築（フレーム移動でも一貫させる）
+  $("log").innerHTML="";
+  logLine("<b>開始</b>："+res.N+"市町村・"+(+$("K").value)+"県・Xmax="+res.Xmax);
+  let alive=prefStatus(res.frames[0]);
+  for(let e=0;e<fi;e++){
+    const ev=res.events[e];
+    logLine("統合"+(e+1)+"：#"+ev.s+"(県"+(ev.prefS+1)+", X="+ev.Xs.toFixed(0)+") → #"+ev.t+"(県"+(ev.prefT+1)+", X="+ev.Xt.toFixed(0)+")");
+    const now=prefStatus(res.frames[e+1]);
+    for(const p of alive) if(!now.has(p)) logLine("県"+(p+1)+" が消滅（吸収先＝県"+(ev.prefT+1)+"）","warn");
+    alive=now;
+  }
+  buildPrefLegend(+$("K").value, alive);
+  $("log").scrollTop=$("log").scrollHeight;
+}
+$("frame").addEventListener("input",draw);
+$("run").addEventListener("click",run);
+$("regen").addEventListener("click",()=>{regen();run();});
+$("play").addEventListener("click",()=>{
+  if(timer){clearInterval(timer);timer=null;$("play").textContent="▶ 再生";return;}
+  $("play").textContent="⏸ 停止"; $("frame").value=0;
+  timer=setInterval(()=>{
+    const f=+$("frame").value;
+    if(f>=res.frames.length-1){clearInterval(timer);timer=null;$("play").textContent="▶ 再生";return;}
+    $("frame").value=f+1; draw();
+  }, +$("speed").value);
+});
+
+$("N").value=180; $("K").value=8; $("Xmax").value=300;
+sync(); regen(); run();
+</script>
+</body>
+</html>

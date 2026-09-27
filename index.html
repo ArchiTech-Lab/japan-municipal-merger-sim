@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>市町村合併シミュレーション（実データ版・全国）</title>
+<style>
+:root{--bg:#0e1417;--fg:#e8eef1;--dim:#8fa3ad;--hi:#4ec9b0;--line:#26333a;--panel:#131c21;--warn:#ffd166}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.6 system-ui,"Noto Sans JP",sans-serif}
+
+/* ===== 1画面目：地図ステージ＋右の操作パネル（density方式・高さ100vh） ===== */
+#top{display:flex;gap:12px;padding:12px;align-items:stretch;height:100vh}
+#stage{position:relative;background:#070b0d;border:1px solid var(--line);border-radius:6px;flex:1 1 auto;min-width:0;overflow:hidden}
+#cv{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+#cv.drag{cursor:grabbing}
+#zoom{position:absolute;top:8px;right:8px;display:flex;gap:5px;z-index:3}
+#zoom button{padding:3px 9px;font-size:14px;background:rgba(19,28,33,.9)}
+#hud{position:absolute;left:8px;bottom:8px;z-index:3;font-size:11.5px;color:var(--dim);background:rgba(7,11,13,.78);border:1px solid var(--line);border-radius:5px;padding:4px 8px;max-width:calc(100% - 16px)}
+#hud b{color:var(--fg)}
+#tip{position:absolute;z-index:4;pointer-events:none;display:none;font-size:11.5px;background:rgba(7,11,13,.94);border:1px solid #3a4f59;border-radius:5px;padding:5px 8px;line-height:1.5;white-space:nowrap}
+#tip b{color:var(--hi)}
+
+#side{width:300px;flex:0 0 300px;min-height:0;overflow-y:auto;padding-right:4px;display:flex;flex-direction:column}
+h1{font-size:15px;margin:0 0 4px}
+.note{color:var(--dim);font-size:11.5px;line-height:1.55}
+.note b{color:var(--fg)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:9px 10px;margin:8px 0}
+.card h2{font:600 11px/1.4 inherit;color:var(--hi);margin:0 0 6px;letter-spacing:.04em;display:flex;align-items:center;gap:6px}
+.kpi{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+.kpi div{background:#162025;border:1px solid var(--line);border-radius:5px;padding:5px 8px}
+.kpi b{display:block;font-size:18px;color:var(--hi);font-variant-numeric:tabular-nums}
+.kpi span{font-size:10.5px;color:var(--dim)}
+button{background:#1d2b32;color:var(--fg);border:1px solid #3a4f59;border-radius:5px;padding:6px 10px;cursor:pointer;font-size:12.5px}
+button:hover{border-color:var(--hi)}
+button.on{background:var(--hi);color:#06231d;border-color:var(--hi)}
+button.ibtn{border-radius:50%;width:20px;height:20px;padding:0;font:700 11px/18px inherit;color:var(--hi);flex:0 0 auto}
+select{width:100%;background:#0d1319;color:var(--fg);border:1px solid #3a4f59;border-radius:5px;padding:5px 6px;font:inherit}
+input[type=range]{width:100%}
+.row{display:flex;gap:6px;align-items:center;margin:6px 0}
+.row>button{flex:1}
+#scrollHint{margin-top:auto;text-align:center;padding:8px 0 2px}
+#scrollHint a{color:var(--hi);text-decoration:none;font-size:12px}
+#footer{text-align:center;color:var(--dim);font-size:11.5px;padding:16px 0 24px}
+#footer a{color:var(--hi);text-decoration:none}
+#footer a:hover{text-decoration:underline}
+
+/* ===== スクロールした下：説明・データ ===== */
+#below{padding:4px 12px 40px;display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;align-items:start}
+#below .card{margin:0}
+.wide{grid-column:1/-1}
+.sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:4px;border:1px solid var(--line)}
+#prefLegend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px}
+#prefLegend .pf{display:flex;align-items:center;gap:2px;color:var(--fg)}
+#prefLegend .pf.dead{color:var(--dim);text-decoration:line-through}
+#log{height:360px;overflow-y:auto;background:#0d1319;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:11px;line-height:1.55}
+#log div{border-bottom:1px dashed var(--line);padding:2px 0}
+#log div.warn{color:var(--warn);font-weight:600}
+
+#modalBg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;align-items:center;justify-content:center}
+#modalBg.show{display:flex}
+#modal{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;max-width:520px;width:92%;max-height:80vh;overflow-y:auto}
+#modal h3{margin:0 0 10px;color:var(--hi);font-size:13px}
+#modal .cav{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);color:var(--warn);font-size:11px}
+#modal button{margin-top:14px}
+</style>
+</head>
+<body>
+
+<div id="top">
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="zoom"><button id="zi" title="拡大">＋</button><button id="zo" title="縮小">−</button><button id="zf" title="日本全体を表示">全体</button></div>
+    <div id="hud"></div>
+    <div id="tip"></div>
+  </div>
+
+  <div id="side">
+    <h1>市町村合併シミュレーション（全国・実データ）</h1>
+    <div class="note">2050年の生産年齢人口と課税対象所得から合成変数Xを作り、Xの低い市町村から隣接市町村と合併させる。<b>色＝その土地が現在属する都道府県</b>（吸収した側の県に塗り替わる）。</div>
+
+    <div class="card">
+      <h2>Xの方式 <button class="ibtn" id="infoBtn" title="なぜこの式か・Xmaxの決め方">i</button></h2>
+      <select id="scheme">
+        <option value="A">案A：最小値型 X=min(P/P*, I/I*)</option>
+        <option value="B">案B：幾何平均型 X=√(P/P*・I/I*)</option>
+        <option value="C">案C：税収換算型（円）</option>
+        <option value="D">案D：規模の経済型（概念実証）</option>
+      </select>
+      <div class="note" id="schemeNote" style="margin-top:6px"></div>
+    </div>
+
+    <div class="kpi">
+      <div><b id="k1">–</b><span>生存市町村</span></div>
+      <div><b id="k2">–</b><span>統合回数</span></div>
+      <div><b id="k3">–</b><span>到達不能（撤退）</span></div>
+      <div><b id="k4">–</b><span>現存都道府県</span></div>
+    </div>
+
+    <div class="row"><button id="play">▶ 再生</button><button id="rew">⟲ 先頭</button><button id="end">⇥ 最終形</button></div>
+    <input type="range" id="frame" min="0" max="0" value="0">
+    <div class="row"><span class="note" id="pos" style="flex:1"></span></div>
+    <div class="row"><span class="note" style="flex:0 0 auto">速度</span><input type="range" id="speed" min="15" max="120" step="5" value="105" style="flex:1" title="右に行くほど速い（全体の再生時間は短くなる）"><span class="note" id="vSpd" style="flex:0 0 68px;text-align:right"></span></div>
+    <div class="row"><button id="rec">⏺ 動画として保存</button><span class="note" id="recmsg"></span></div>
+
+    <div id="scrollHint"><a href="#below">▼ 説明・都道府県・統合ログ・データは下へ</a></div>
+  </div>
+</div>
+
+<div id="below">
+  <div class="card wide">
+    <h2>都道府県（消滅した県は取り消し線）</h2>
+    <div id="prefLegend"></div>
+  </div>
+
+  <div class="card">
+    <h2>統合ログ</h2>
+    <div id="log"></div>
+  </div>
+
+  <div class="card">
+    <h2>合併ルール（このシミュレーションの前提条件）</h2>
+    <div class="note">
+      ① Xが最も低い市町村から処理する（取り残し防止）<br>
+      ② 隣接市町村のうち<b>Xが最も低い方</b>と合併する<br>
+      ③ 全市町村のX≥Xmaxで停止<br>
+      ④ 合併後の主体（都道府県の帰属先）は<b>Xが大きい方</b>＝吸収した側が継承する。県境は固定せず、県が丸ごと消えることも許容する
+    </div>
+    <h2 style="margin-top:12px">凡例</h2>
+    <div class="note">
+      <b>太線（黒縁＋白芯）＝その時点の都道府県境</b>。合併で吸収した側の県に土地が移るたびに引き直す（隣り合う市町村の現在の所属県が違う箇所だけを描く）。<b>細線＝その時点で別の主体になっている市町村どうしの境</b>。同じ主体に合併した市町村どうしの間の線は消え、合併で一体化した範囲が単色の塊として見える<br>
+      ○白＝X≥Xmaxを達成した自治体の代表点　●黒＝未達　黄の輪＝到達不能（隣接なし・撤退）。
+      全体表示では重なって潰れるだけなので、ある程度ズームインするまでは非表示<br>
+      操作：ホイールで拡大縮小、ドラッグで移動、ダブルクリックまたは「全体」で日本全体に戻る。地図上にカーソルを置くと市町村名と現在の所属を表示
+    </div>
+    <h2 style="margin-top:12px">Xの方式の考え方とXmaxの推定方法</h2>
+    <div class="note" id="xmaxBelow"></div>
+  </div>
+
+  <div class="card">
+    <h2>データと限界</h2>
+    <div class="note" id="dataNote"></div>
+    <div class="note" style="margin-top:8px">
+      市町村の形・隣接関係は国土数値情報N03（2023年）。政令市の区は1市に統合、東京23区は独立した基礎自治体として扱う。
+      北方領土6村・無人島や地先の土地など人口統計そのものが無い地点はX=0として通常どおり合併対象にする一方、
+      福島浜通り13市町村（実住民はいるがIPSSが個別推計を出していない）はデータが無いため「常に達成」扱いのまま合併しない。<br>
+      陸で隣接しない離島は、境界線どうしの最短距離による最小全域木で最小本数の橋を架けて合併できるようにしている
+      （本州＋四国／九州／北海道／沖縄本島どうしは直接架橋しない。<code>src/build_sea_links.py</code>）。<br>
+      <b>簡略化している点</b>：県境の太線は、描画用に間引いた市町村輪郭から隣接ペアごとの共有部分を取り出したもの（<code>src/build_borders.py</code>）で、測量上の境界線そのものではない。
+      案Dは実際の歳出データではなく、総務省の類似団体別職員数から作った概算モデル式に実データの人口を当てはめた概念実証。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>出典</h2>
+    <div class="note">
+      「国土数値情報（行政区域データ N03・2023年）」（国土交通省）<br>
+      国立社会保障・人口問題研究所「日本の地域別将来推計人口（令和5年推計）」<br>
+      総務省「市町村税課税状況等の調」（令和7年度）<br>
+      本ページはこれらを加工して作成した。<b>⚠ 仮定を置いた機械的な計算であり、政府・自治体の計画でも提案でもない。</b>
+    </div>
+  </div>
+
+  <div id="footer">作成：<a href="https://note.com/architech_labo" target="_blank" rel="noopener">ArchiTech Lab</a></div>
+</div>
+
+<div id="modalBg"><div id="modal">
+  <h3 id="modalTitle"></h3>
+  <div id="modalBody" class="note"></div>
+  <div class="cav">※ Xmaxは暫定的な推定値であり、行政による公式な計画・判断ではありません。</div>
+  <button id="modalClose">閉じる</button>
+</div></div>
+
+<script src="gappei_real_data.js"></script>
+<script src="gappei_borders.js"></script>
+<script src="gappei_sea_links.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const D=GAPPEI_REAL_DATA, XMETA=D.xmeta, N=D.munis.length;
+
+/* ===== Xmax根拠（仕様書§3.3a/§3.3b） ===== */
+const X_INTRO="Xは「その自治体が行政を続けていける体力」を1つの数にしたもの。材料は2つ：<b>P＝2050年の生産年齢人口（15〜64歳）</b>＝税を納め、地域の仕事や行政の担い手になる人の量、<b>I＝課税対象所得</b>＝住民税の元になる所得の総額（市町村別のGDPは全国で揃った統計が無いため、その代わり）。合併したら2つの自治体のPとIをそれぞれ足してからXを計算し直すので、どの方式でも合併するほどXは大きくなる。4つの方式の違いは「人とお金のどちらを重く見るか、片方の不足をもう片方で補えるとみなすか」の考え方の違い。";
+const SCHEME_INFO={
+  A:{short:"人とお金の<b>弱い方</b>で判定。どちらか一方でも足りなければ未達。最も厳しい基準。",
+     why:"行政を回すには、職員や地域の担い手になる<b>人</b>と、それを支える<b>税源</b>の両方が要る。人が多くても所得が低ければ財源が足りず、所得が高くても人が少なければ窓口・インフラ維持・議会などの担い手が足りない。どちらか一方が欠ければ運営が止まる（ボトルネック）と考え、基準値に対する達成率の<b>小さい方</b>をXとする。P/P*とI/I*は「基準の何倍あるか」で、両方が1以上＝X≥1で達成。",
+     note:"P*=2050年生産年齢人口20万人・I*=課税対象所得約6,400億円。Xmax=1。",
+     title:"案A：最小値型のXmax推定方法",
+     body:"P*（20万人）は、総務省の類似団体別職員数から「固定的な職員（法定職・議会・企画・情報等）≈70人／自治体」「人口比例の職員≈人口1万人あたり62〜66人」という単純モデルを作り、DXで人口比例業務が半減した後も固定的職員の比率が10%以下になる規模として概算した（2100年の総人口約20万人を、IPSS出生低位推計の減少率で2050年の生産年齢人口に割り戻した値）。I*はP*に全国平均の生産年齢1人当たり課税対象所得（約321万円・総務省令和7年度市町村税課税状況等の調）を掛けた値。"},
+  B:{short:"人とお金を<b>掛け合わせて</b>判定。片方の不足を、もう片方である程度補える。",
+     why:"現実には、人が少なくても税源が豊かならデジタル化や外部委託で補え、税源が乏しくても人が多ければ広域連携や共同処理で補える。そこで2つの達成率を<b>幾何平均</b>（掛けて平方根）する。足し算の平均にしないのは、片方がゼロに近いときにもう片方がいくら大きくても合格させないため＝「ある程度は補えるが、完全には代わりにならない」という中間の考え方。案Aより基準が緩く、合併はやや少なく済む。",
+     note:"P*・I*はAと同じ。片方の不足を他方で補える。Xmax=1。",
+     title:"案B：幾何平均型のXmax推定方法",
+     body:"基準値P*・I*は案Aと同一（職員数モデルによる2050年生産年齢人口20万人と、それに対応する課税対象所得約6,400億円）。式を最小値でなく幾何平均にしているため、人の不足を税源で、税源の不足を人で補える。"},
+  C:{short:"人と所得を<b>住民税の見込み額（円）</b>に換算して足し合わせる。結果が金額でわかりやすい。",
+     why:"人と所得は単位が違うので、そのままでは足せない。そこで両方を「市町村に実際に入る住民税」という共通の単位（円）に直して合計する。所得からは<b>所得割</b>（所得に比例する税。課税対象所得×約4.03%相当）、人からは<b>均等割</b>（1人あたり定額。約4,000円）。自治体の財布の大きさとして直感的に理解しやすい一方、所得割の比重が大きいため所得の高い都市部が強く出て、人の多さはあまり効かない。",
+     note:"Xmax≈266億円（=I*×4.03%＋P*×4,000円）。Aの基準を円に換算。",
+     title:"案C：税収換算型のXmax推定方法",
+     body:"個人住民税の所得割6%は課税対象所得ではなく課税標準額（課税対象所得の約67.2%）に掛かるため、所得割はI×4.03%相当。均等割（市町村民税3,000円＋道府県民税1,000円）をP×4,000円で近似して加算。Xmaxは案AのP*・I*をこの式に当てはめた値で、独立した財政的根拠はない。"},
+  D:{short:"<b>人口規模だけ</b>で判定。所得は見ない最も単純な式。他の案と比べる物差し。",
+     why:"自治体には人口にかかわらず必要な仕事（首長・議会・会計・情報システムなど）があり、人口が小さいほどその固定的な負担が住民1人あたりに重くのしかかる（<b>規模の経済</b>）。そこで「固定的な仕事の割合が十分小さくなる人口規模」に届いているかだけで判定する。所得の差を無視するため、所得が低い地域も高い地域も人口が同じなら同じ評価になる。A〜Cの結果が所得の影響でどれだけ変わるかを見るための基準線として置いている。",
+     note:"Xmax=2050年生産年齢人口21万人相当（概算モデル）。",
+     title:"案D：規模の経済型のXmax推定方法",
+     body:"総務省の類似団体別職員数から「1人当たり職員数 s(N)=F/N+v」（F≈70人、v≈人口1万人あたり62〜66人）を作り、DXで人口比例業務(v)が半減しても固定的職員(F)の比率が10%以下になる人口規模を解いた値。実際の歳出データではなく、モデル式に実データの人口を当てはめた概念実証。"},
+};
+const SCHEME_NAME={A:"案A：最小値型",B:"案B：幾何平均型",C:"案C：税収換算型",D:"案D：規模の経済型"};
+function updateSchemeNote(){
+  const s=$("scheme").value;
+  $("schemeNote").innerHTML=SCHEME_INFO[s].short+"<br>"+SCHEME_INFO[s].note+"（詳しくは i または下の説明）";
+  let h=X_INTRO+"<br><br>";
+  for(const k of ["A","B","C","D"]){
+    h+='<div style="margin:6px 0;padding:6px 8px;border-radius:5px;border:1px solid '+(k===s?"var(--hi)":"var(--line)")+'">'+
+       "<b>"+SCHEME_NAME[k]+(k===s?"（表示中）":"")+"</b>："+SCHEME_INFO[k].why+"</div>";
+  }
+  h+="<br><b>"+SCHEME_INFO[s].title+"</b><br>"+SCHEME_INFO[s].body;
+  $("xmaxBelow").innerHTML=h;
+}
+$("infoBtn").addEventListener("click",()=>{
+  const s=$("scheme").value, info=SCHEME_INFO[s];
+  $("modalTitle").textContent=SCHEME_NAME[s]+"：なぜこの式か・Xmaxの決め方";
+  $("modalBody").innerHTML="<b>なぜこの式か</b><br>"+info.why+"<br><br><b>Xmaxの推定方法</b><br>"+info.body;
+  $("modalBg").classList.add("show");
+});
+$("modalClose").addEventListener("click",()=>$("modalBg").classList.remove("show"));
+$("modalBg").addEventListener("click",e=>{ if(e.target===$("modalBg")) $("modalBg").classList.remove("show"); });
+
+/* ===== X計算 ===== */
+function computeXmax(scheme){
+  const {P_STAR,I_STAR,D_XMAX_P2050}=XMETA;
+  if(scheme==="A"||scheme==="B") return 1;
+  if(scheme==="C") return I_STAR*0.0403+P_STAR*4000;
+  return D_XMAX_P2050;
+}
+function computeX(scheme,p,i){
+  const {P_STAR,I_STAR}=XMETA;
+  if(scheme==="A") return Math.min(p/P_STAR,i/I_STAR);
+  if(scheme==="B") return Math.sqrt((p/P_STAR)*(i/I_STAR));
+  if(scheme==="C") return i*0.0403+p*4000;
+  return p;
+}
+function fmtX(scheme,x){
+  if(scheme==="C") return (x/1e8).toFixed(1)+"億円";
+  if(scheme==="D") return Math.round(x).toLocaleString()+"人";
+  return x.toFixed(3);
+}
+
+/* ===== 都道府県パレット（隣り合う県が同系色にならないよう、隣接グラフに彩色する） ===== */
+const N_PREF=D.prefs.length;
+const PAL_BASE=["#e63946","#1d4ed8","#2a9d8f","#f4a261","#7c3aed","#facc15","#059669","#db2777",
+  "#0ea5e9","#b45309","#84cc16","#c026d3","#334155","#14b8a6","#dc2626","#a3e635",
+  "#f97316","#6366f1","#22c55e","#e879f9","#0891b2","#eab308","#be123c","#4d7c0f"];
+const PAL=(()=>{
+  const adj=Array.from({length:N_PREF},()=>new Set());
+  for(const m of D.munis) for(const j of m.nb){ const p=m.pref,q=D.munis[j].pref; if(p!==q){ adj[p].add(q); adj[q].add(p); } }
+  // 直接隣り合う県だけでなく「隣の隣」まで色を分ける（2ホップ彩色）。同系色の地域がまとまって見えるのを防ぐ
+  const adj2=adj.map((s,p)=>{ const u=new Set(s); for(const q of s) for(const r of adj[q]) if(r!==p) u.add(r); return u; });
+  const order=[...Array(N_PREF).keys()].sort((a,b)=>adj2[b].size-adj2[a].size); // Welsh-Powell：次数の多い県から塗る
+  // 1回目：必要最小限の色数を調べる
+  const colorMin=new Int8Array(N_PREF).fill(-1);
+  for(const p of order){
+    const used=new Set([...adj2[p]].map(q=>colorMin[q]).filter(c=>c>=0));
+    let c=0; while(used.has(c)) c++;
+    colorMin[p]=c;
+  }
+  const nMin=Math.max(...colorMin)+1;
+  // 合併で県境が動くと、本来2ホップ以上離れていた県どうしがたまたま隣接することがあり、
+  // 最小色数のままだと偶然の同色接触が起きうる。1色あたりの担当県数を減らして事故率を下げるため、
+  // 必要最小限の1.5倍の色数を使い、各県には「まだ使用回数が少ない色」を優先的に割り当てて満遍なく散らす
+  const K=Math.min(PAL_BASE.length,Math.ceil(nMin*1.5));
+  const colorOf=new Int8Array(N_PREF).fill(-1), useCount=new Array(K).fill(0);
+  for(const p of order){
+    const banned=new Set([...adj2[p]].map(q=>colorOf[q]).filter(c=>c>=0));
+    let best=-1;
+    for(let c=0;c<K;c++) if(!banned.has(c)&&(best===-1||useCount[c]<useCount[best])) best=c;
+    if(best===-1){ let c=0; while(banned.has(c)) c++; best=c; } // 理論上は起きない保険
+    colorOf[p]=best; useCount[best]++;
+  }
+  return Array.from({length:N_PREF},(_,p)=>PAL_BASE[colorOf[p]]);
+})();
+
+/* ===== 幾何：ワールド座標でPath2Dを1回だけ作る（経度はbuild_real.pyでcos補正済み） ===== */
+let allX=[],allY=[];
+for(const m of D.munis) for(const r of m.rings) for(const p of r){allX.push(p[0]);allY.push(p[1]);}
+allX.sort((a,b)=>a-b); allY.sort((a,b)=>a-b);
+const pct=(a,p)=>a[Math.floor(a.length*p)], TRIM=0.006;
+const lon0=pct(allX,TRIM), lon1=pct(allX,1-TRIM), lat0=pct(allY,TRIM), lat1=pct(allY,1-TRIM);
+allX=null; allY=null;
+const WS=1000/(lon1-lon0);
+const W0=1000, H0=(lat1-lat0)*WS;
+const wx=lon=>(lon-lon0)*WS, wy=lat=>(lat1-lat)*WS;
+const paths=[], markers=[];
+for(const m of D.munis){
+  const p=new Path2D();
+  for(const ring of m.rings){
+    if(ring.length<3) continue;
+    p.moveTo(wx(ring[0][0]),wy(ring[0][1]));
+    for(let k=1;k<ring.length;k++) p.lineTo(wx(ring[k][0]),wy(ring[k][1]));
+    p.closePath();
+  }
+  paths.push(p); markers.push([wx(m.c[0]),wy(m.c[1])]);
+}
+/* 隣接ペアの共有境界（build_borders.py）。現在の所属県が違うペアだけを太線にする */
+const BORD=GAPPEI_BORDERS.map(([i,j,parts])=>{
+  const p=new Path2D();
+  for(const l of parts){ p.moveTo(wx(l[0][0]),wy(l[0][1])); for(let k=1;k<l.length;k++) p.lineTo(wx(l[k][0]),wy(l[k][1])); }
+  return {i,j,p};
+});
+/* 海越しの隣接ペア（build_sea_links.py／方式②：陸で隣接しない離島を最小架橋数で結ぶ。
+   本州＋四国／九州／北海道／沖縄本島どうしは直接架橋しない）。共有境界が無いので代表点を直線で結んで示す */
+const SEA=(typeof GAPPEI_SEA_LINKS!=='undefined'?GAPPEI_SEA_LINKS:[]).map(([i,j])=>({i,j}));
+
+/* ===== シミュレーション（合併ルール①〜④、union-find） ===== */
+function simulate(scheme){
+  const xmax=computeXmax(scheme);
+  const P=new Float64Array(N), I=new Float64Array(N), X=new Float64Array(N), noData=new Uint8Array(N);
+  for(let i=0;i<N;i++){
+    const m=D.munis[i];
+    if(m.p2050==null){ X[i]=xmax; noData[i]=1; }   // 推計なし＝常に達成扱い。これを含む主体は合併後も達成扱いを保つ
+    else { P[i]=m.p2050; I[i]=m.i2050; X[i]=computeX(scheme,P[i],I[i]); }
+  }
+  const par=Array.from({length:N},(_,i)=>i);
+  const find=i=>{while(par[i]!==i){par[i]=par[par[i]];i=par[i];}return i;};
+  const nb=D.munis.map(m=>new Set(m.nb));
+  for(const e of SEA){ nb[e.i].add(e.j); nb[e.j].add(e.i); }  // 推計なしの地点はbuild_sea_links.pyで橋の対象から除外済み
+  const alive=new Set(Array.from({length:N},(_,i)=>i)), un=new Set();
+  const X0=Float64Array.from(X), events=[];
+  const snap=()=>Int32Array.from({length:N},(_,i)=>find(i));
+  const frames=[snap()];
+  let guard=0;
+  while(guard++<N*2){
+    const cand=[...alive].filter(i=>X[i]<xmax&&!un.has(i)).sort((a,b)=>X[a]-X[b]);
+    if(!cand.length) break;
+    const s=cand[0];
+    const pool=[...new Set([...nb[s]].map(find))].filter(t=>t!==s&&alive.has(t));
+    if(!pool.length){ un.add(s); continue; }
+    pool.sort((a,b)=>X[a]-X[b]);
+    const t=pool[0];
+    const ev={s,t,Xs:X[s],Xt:X[t]};
+    P[t]+=P[s]; I[t]+=I[s]; noData[t]|=noData[s];
+    X[t]=noData[t] ? Math.max(xmax,computeX(scheme,P[t],I[t])) : computeX(scheme,P[t],I[t]);
+    ev.Xafter=X[t]; events.push(ev);
+    par[s]=t; alive.delete(s);
+    for(const q of nb[s]) if(q!==t) nb[t].add(q);
+    frames.push(snap());
+  }
+  // 各フレームの県の生死を先に計算しておく（ログ・凡例用）
+  const prefAlive=frames.map(fr=>{const s=new Set(); for(let i=0;i<N;i++) s.add(D.munis[fr[i]].pref); return s;});
+  return {xmax,X0,frames,events,un:new Set(un),prefAlive,survivors:alive.size,merges:events.length,unreach:un.size};
+}
+
+/* ===== 表示（キャンバスはステージいっぱい・地図は中でfit） ===== */
+const cv=$("cv"), cx=cv.getContext("2d"), stage=$("stage");
+const DPR=Math.min(2,window.devicePixelRatio||1);
+let VW=0,VH=0;
+const view={s:1,tx:0,ty:0}; let fitS=1;
+const MARKER_MIN_ZOOM=2.2; // fitS（日本全体表示）の何倍にズームインしたら市役所マークを出すか
+function resize(){
+  VW=stage.clientWidth; VH=stage.clientHeight;
+  cv.width=Math.round(VW*DPR); cv.height=Math.round(VH*DPR);
+  fitS=Math.min(VW/W0,VH/H0)*0.96;
+}
+function fit(){
+  view.s=fitS; view.tx=(VW-W0*view.s)/2; view.ty=(VH-H0*view.s)/2; redraw();
+}
+function zoomAt(px,py,f){
+  const s2=Math.max(fitS*0.5,Math.min(fitS*80,view.s*f));
+  const k=s2/view.s;
+  view.tx=px-(px-view.tx)*k; view.ty=py-(py-view.ty)*k; view.s=s2; redraw();
+}
+
+let res=null, fi=0;
+function redraw(){
+  if(!res) return;
+  const fr=res.frames[fi], s=view.s;
+  cx.setTransform(1,0,0,1,0,0); cx.clearRect(0,0,cv.width,cv.height);
+  cx.setTransform(DPR*s,0,0,DPR*s,DPR*view.tx,DPR*view.ty);
+  for(let i=0;i<N;i++){
+    cx.fillStyle=PAL[D.munis[fr[i]].pref];
+    cx.fill(paths[i],"evenodd");
+  }
+  // 現在の合併後の市町村境：同じ塊（fr[i]が同じ）の内側の線は描かず、別の塊との境目だけ描く
+  // → 合併して一体化した範囲が輪郭として見え、元の市町村線が重なって埋もれる問題を解消
+  const mb=new Path2D();
+  for(const b of BORD) if(fr[b.i]!==fr[b.j]) mb.addPath(b.p);
+  cx.lineJoin="round"; cx.lineCap="round";
+  cx.strokeStyle="rgba(7,11,13,.75)"; cx.lineWidth=0.9/s; cx.stroke(mb);
+  // 都道府県境（さらに太線）：下に黒の太線、上に明るい細線を重ねてどの塗り色の上でも見えるようにする
+  const cur=i=>D.munis[fr[i]].pref;
+  const pb=new Path2D();
+  for(const b of BORD) if(cur(b.i)!==cur(b.j)) pb.addPath(b.p);
+  cx.lineJoin="round"; cx.lineCap="round";
+  cx.strokeStyle="#05080a"; cx.lineWidth=3.2/s; cx.stroke(pb);
+  cx.strokeStyle="rgba(232,238,241,.85)"; cx.lineWidth=1.1/s; cx.stroke(pb);
+  // 海越しの合併候補：陸の共有境界が無いので代表点どうしを点線で結び、合併が起きる可能性を示す（まだ別の塊のペアだけ）
+  cx.save(); cx.setLineDash([5/s,4/s]); cx.strokeStyle="rgba(255,209,102,.55)"; cx.lineWidth=1.1/s;
+  cx.beginPath();
+  for(const e of SEA) if(fr[e.i]!==fr[e.j]){ const[ax,ay]=markers[e.i],[bx,by]=markers[e.j]; cx.moveTo(ax,ay); cx.lineTo(bx,by); }
+  cx.stroke(); cx.restore();
+
+  // 市役所マーク：全体表示に近いズームでは市町村数ぶん重なって潰れるだけなので、一定以上ズームインしてから出す
+  if(s >= fitS*MARKER_MIN_ZOOM){
+    const X=currentX(), r1=2.4/s, r2=5.5/s;
+    const roots=new Set(fr);
+    cx.lineWidth=1/s;
+    for(const rt of roots){
+      const [px,py]=markers[rt], ok=X[rt]>=res.xmax;
+      cx.fillStyle=ok?"#fff":"#111"; cx.strokeStyle=ok?"#111":"#fff";
+      cx.beginPath(); cx.arc(px,py,r1,0,6.2832); cx.fill(); cx.stroke();
+    }
+    cx.strokeStyle="#ffd166"; cx.lineWidth=1.4/s;
+    for(const rt of res.un){ if(!roots.has(rt)) continue; const [px,py]=markers[rt]; cx.beginPath(); cx.arc(px,py,r2,0,6.2832); cx.stroke(); }
+  }
+}
+
+/* 現フレーム時点の各代表のX（合併のたびに吸収側だけ変わるのでイベントから再構成） */
+let xCacheFi=-1, xCache=null;
+function currentX(){
+  if(xCacheFi===fi) return xCache;
+  const X=Float64Array.from(res.X0);
+  for(let e=0;e<fi;e++){ const ev=res.events[e]; X[ev.t]=ev.Xafter; }
+  xCacheFi=fi; xCache=X; return X;
+}
+
+/* ===== 操作：ホイール拡大・ドラッグ移動・ピンチ・ダブルクリック ===== */
+cv.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const r=cv.getBoundingClientRect();
+  zoomAt(e.clientX-r.left,e.clientY-r.top,e.deltaY<0?1.2:1/1.2);
+},{passive:false});
+let drag=null;
+cv.addEventListener("mousedown",e=>{drag=[e.clientX,e.clientY];cv.classList.add("drag");});
+window.addEventListener("mousemove",e=>{
+  if(drag){ view.tx+=e.clientX-drag[0]; view.ty+=e.clientY-drag[1]; drag=[e.clientX,e.clientY]; redraw(); $("tip").style.display="none"; return; }
+  hover(e);
+});
+window.addEventListener("mouseup",()=>{drag=null;cv.classList.remove("drag");});
+cv.addEventListener("mouseleave",()=>{$("tip").style.display="none";});
+cv.addEventListener("dblclick",fit);
+let touch=null;
+cv.addEventListener("touchstart",e=>{
+  e.preventDefault();
+  const r=cv.getBoundingClientRect(), t=[...e.touches].map(t=>[t.clientX-r.left,t.clientY-r.top]);
+  touch=t.length===1?{m:"pan",p:t[0]}:{m:"pinch",d:Math.hypot(t[0][0]-t[1][0],t[0][1]-t[1][1]),c:[(t[0][0]+t[1][0])/2,(t[0][1]+t[1][1])/2]};
+},{passive:false});
+cv.addEventListener("touchmove",e=>{
+  e.preventDefault(); if(!touch) return;
+  const r=cv.getBoundingClientRect(), t=[...e.touches].map(t=>[t.clientX-r.left,t.clientY-r.top]);
+  if(touch.m==="pan"&&t.length===1){ view.tx+=t[0][0]-touch.p[0]; view.ty+=t[0][1]-touch.p[1]; touch.p=t[0]; redraw(); }
+  else if(touch.m==="pinch"&&t.length===2){ const d=Math.hypot(t[0][0]-t[1][0],t[0][1]-t[1][1]); zoomAt(touch.c[0],touch.c[1],d/touch.d); touch.d=d; }
+},{passive:false});
+cv.addEventListener("touchend",()=>{touch=null;});
+$("zi").addEventListener("click",()=>zoomAt(VW/2,VH/2,1.5));
+$("zo").addEventListener("click",()=>zoomAt(VW/2,VH/2,1/1.5));
+$("zf").addEventListener("click",fit);
+let rsT=null;
+window.addEventListener("resize",()=>{clearTimeout(rsT);rsT=setTimeout(()=>{resize();fit();},120);});
+
+/* カーソル位置の市町村名と現在の所属 */
+function hover(e){
+  if(!res) return;
+  const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  if(mx<0||my<0||mx>r.width||my>r.height){ $("tip").style.display="none"; return; }
+  const wxp=(mx-view.tx)/view.s, wyp=(my-view.ty)/view.s;
+  cx.setTransform(1,0,0,1,0,0);
+  let hit=-1;
+  for(let i=0;i<N;i++){ if(cx.isPointInPath(paths[i],wxp,wyp,"evenodd")){hit=i;break;} }
+  if(hit<0){ $("tip").style.display="none"; return; }
+  const fr=res.frames[fi], rt=fr[hit], m=D.munis[hit], R=D.munis[rt];
+  const tip=$("tip");
+  tip.innerHTML="<b>"+m.name+"</b>（元："+D.prefs[m.pref]+"）"+(rt!==hit?"<br>→ "+R.name+"に合併済み（"+D.prefs[R.pref]+"）":"<br>存続中");
+  tip.style.display="block";
+  tip.style.left=Math.min(mx+14,r.width-tip.offsetWidth-6)+"px"; tip.style.top=Math.min(my+14,r.height-tip.offsetHeight-6)+"px";
+}
+
+/* ===== 凡例・ログ・HUD ===== */
+function buildPrefLegend(aliveSet){
+  const el=$("prefLegend"); el.innerHTML="";
+  D.prefs.forEach((name,p)=>{
+    const sp=document.createElement("span"); sp.className="pf"+(aliveSet.has(p)?"":" dead");
+    sp.innerHTML='<i class="sw" style="background:'+PAL[p]+'"></i>'+name+(aliveSet.has(p)?"":"（消滅）");
+    el.appendChild(sp);
+  });
+}
+function buildLog(){
+  const scheme=$("scheme").value, frag=document.createDocumentFragment();
+  const h=document.createElement("div");
+  h.innerHTML="<b>開始</b>：全国"+N+"市区町村・"+N_PREF+"都道府県・方式"+scheme+"・Xmax="+fmtX(scheme,res.xmax);
+  frag.appendChild(h);
+  for(let e=0;e<fi;e++){
+    const ev=res.events[e], S=D.munis[ev.s], T=D.munis[ev.t];
+    const d=document.createElement("div");
+    d.textContent="統合"+(e+1)+"："+S.name+"（"+D.prefs[S.pref]+", X="+fmtX(scheme,ev.Xs)+"）→ "+T.name+"（"+D.prefs[T.pref]+", X="+fmtX(scheme,ev.Xt)+"）";
+    frag.appendChild(d);
+    for(const p of res.prefAlive[e]) if(!res.prefAlive[e+1].has(p)){
+      const w=document.createElement("div"); w.className="warn";
+      w.textContent=D.prefs[p]+" が消滅（吸収先＝"+D.prefs[T.pref]+"）";
+      frag.appendChild(w);
+    }
+  }
+  const log=$("log"); log.innerHTML=""; log.appendChild(frag); log.scrollTop=log.scrollHeight;
+}
+function updateHud(){
+  const scheme=$("scheme").value, n=res.frames.length-1;
+  $("pos").textContent="統合 "+fi+" / "+n+"　生存 "+new Set(res.frames[fi]).size+"　現存県 "+res.prefAlive[fi].size;
+  let t="<b>方式"+scheme+"</b>　統合 "+fi+" / "+n;
+  if(fi>0){ const ev=res.events[fi-1]; t+="　直近："+D.munis[ev.s].name+" → <b>"+D.munis[ev.t].name+"</b>（"+D.prefs[D.munis[ev.t].pref]+"）"; }
+  $("hud").innerHTML=t;
+}
+let logT=null;
+function show(i){
+  fi=Math.max(0,Math.min(res.frames.length-1,i)); $("frame").value=fi;
+  redraw(); updateHud();
+  // 都道府県一覧とログはDOMを作り直すので重い。再生中は間引く
+  clearTimeout(logT); logT=setTimeout(()=>{ buildPrefLegend(res.prefAlive[fi]); buildLog(); }, timer?250:0);
+}
+
+/* ===== 実行・再生 =====
+   スライダーは「最初から最後までの秒数」。経過時間から表示すべきフレームを決め、描画が間に合わなければ
+   途中のフレームを飛ばす（1フレームずつ進める方式だと、描画1回が数十msかかる環境では指定秒数を超えてしまう） */
+let timer=null, playT0=0, playF0=0, playDone=null, recording=false;
+// スライダーのDOM値は「速さ」（右＝大きい値＝速い）。表示・計算に使う「全体の秒数」はそこから逆算する
+// （min+max=135なので、秒数=135-DOM値。DOM値=120→15秒、DOM値=15→120秒）
+const curSec=()=>135-(+$("speed").value);
+const spdLabel=()=>{ $("vSpd").textContent="全体 "+curSec()+"秒"; };
+const msPerFrame=()=>(curSec()*1000)/Math.max(1,res.frames.length-1);
+function tick(now){
+  const n=res.frames.length-1;
+  const f=Math.min(n, playF0+Math.floor((now-playT0)/msPerFrame()));
+  if(f!==fi) show(f);
+  if(f>=n){ const done=playDone; stop(); buildPrefLegend(res.prefAlive[fi]); buildLog(); if(done) done(); return; }
+  timer=requestAnimationFrame(tick);
+}
+function startPlay(onDone){
+  if(fi>=res.frames.length-1) show(0);
+  playDone=onDone||null; playT0=performance.now(); playF0=fi;
+  $("play").textContent="⏸ 停止";
+  timer=requestAnimationFrame(tick);
+}
+function run(){
+  stop();
+  res=simulate($("scheme").value); xCacheFi=-1;
+  $("frame").max=res.frames.length-1;
+  $("k1").textContent=res.survivors+" / "+N;
+  $("k2").textContent=res.merges;
+  $("k3").textContent=res.unreach;
+  $("k4").textContent=res.prefAlive[res.prefAlive.length-1].size+" / "+N_PREF;
+  show(0);
+}
+function stop(){ if(timer){cancelAnimationFrame(timer);timer=null;} playDone=null; $("play").textContent="▶ 再生"; }
+$("scheme").addEventListener("change",()=>{ if(recording) return; updateSchemeNote(); run(); });
+$("frame").addEventListener("input",()=>{ if(recording) return; stop(); show(+$("frame").value); });
+$("rew").addEventListener("click",()=>{ if(recording) return; stop(); show(0); });
+$("end").addEventListener("click",()=>{ if(recording) return; stop(); show(res.frames.length-1); });
+$("speed").addEventListener("input",()=>{ spdLabel(); if(timer){ playT0=performance.now(); playF0=fi; } });
+$("play").addEventListener("click",()=>{
+  if(recording) return;
+  if(timer){ stop(); return; }
+  startPlay();
+});
+
+/* ===== 録画（canvas.captureStream→MediaRecorder。mp4対応ブラウザはmp4、非対応ならwebmに自動で切り替え） ===== */
+const recBtn=$("rec"), recMsg=$("recmsg");
+function pickRecMime(){
+  const cands=["video/mp4;codecs=avc1","video/mp4","video/webm;codecs=vp9","video/webm"];
+  for(const m of cands) if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return null;
+}
+const RECMIME=pickRecMime();
+if(!window.MediaRecorder||!cv.captureStream||!RECMIME){ recBtn.disabled=true; recMsg.textContent="この環境では録画不可"; }
+else recBtn.addEventListener("click",()=>{
+  stop(); show(0);
+  const ext=RECMIME.startsWith("video/mp4")?"mp4":"webm";
+  const st=cv.captureStream(30), mr=new MediaRecorder(st,{mimeType:RECMIME}), ch=[];
+  mr.ondataavailable=e=>{ if(e.data.size) ch.push(e.data); };
+  mr.onstop=()=>{
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob(ch,{type:RECMIME}));
+    a.download="gappei_merger_"+$("scheme").value+"."+ext; a.click();
+    recMsg.textContent="保存しました（"+ext+"）"; recBtn.disabled=false; recording=false;
+  };
+  recBtn.disabled=true; recording=true; recMsg.textContent="録画中…（全体 "+curSec()+"秒）";
+  mr.start();
+  startPlay(()=>setTimeout(()=>mr.stop(),500));   // 録画の長さ＝速度スライダーの秒数
+});
+
+/* ===== 初期化 ===== */
+const nMissing=D.munis.filter(m=>m.p2050==null).length, nIsolated=D.munis.filter(m=>m.nb.length===0).length;
+$("dataNote").innerHTML="<b>全国 "+N+" 市区町村・"+N_PREF+" 都道府県。</b>陸で隣接なし（海越しの橋で合併可）＝"+nIsolated+
+  "、X未算出（常に達成扱い・合併しない）＝"+nMissing+"。人口・課税対象所得はIPSS令和5年推計と総務省統計に基づく実データ。";
+updateSchemeNote();
+spdLabel();
+resize(); run(); fit();
+</script>
+</body>
+</html>
