@@ -103,7 +103,7 @@ input[type=range]{width:100%}
 
     <div class="card">
       <h2>追加ルール⑤（県の吸収）</h2>
-      <label class="note" style="display:block;cursor:pointer"><input type="checkbox" id="rule2" checked> 県内の市町村が3未満になったら、隣接県のうち<b>Xが最も高い県</b>に吸収される</label>
+      <label class="note" style="display:block;cursor:pointer"><input type="checkbox" id="rule2" checked> 県内の市町村が3未満になったら、隣接県のうち<b>Xが最小の県</b>と合併し、<b>Xが大きい方に吸収</b>される</label>
     </div>
 
     <div class="kpi">
@@ -143,7 +143,7 @@ input[type=range]{width:100%}
       ② 隣接市町村のうち<b>Xが最も低い方</b>と合併する<br>
       ③ 全市町村のX≥Xmaxで停止<br>
       ④ 合併後の主体（都道府県の帰属先）は<b>Xが大きい方</b>＝吸収した側が継承する。県境は固定せず、県が丸ごと消えることも許容する<br>
-      ⑤（追加・ON/OFF可）県内の市町村（その時点の主体）が<b>3未満</b>になった県は、隣接県のうち<b>県Xが最も高い県</b>に丸ごと吸収される。県Xは県内の主体のP・Iを合算して方式A〜Dの式で計算。Xが低い県から処理し、連鎖があれば繰り返す。隣接県が無い県（沖縄など）は吸収されない
+      ⑤（追加・ON/OFF可）県内の市町村（その時点の主体）が<b>3未満</b>になった県は、隣接県のうち<b>県Xが最小の県</b>と合併し、2県のうち<b>Xが大きい方が残り、小さい方が吸収</b>される（県の帰属は残った側に統一）。県Xは県内の主体のP・Iを合算して方式A〜Dの式で計算。Xが低い県から処理し、連鎖があれば繰り返す。隣接県が無い県（沖縄など）は吸収されない
     </div>
     <h2 style="margin-top:12px">凡例</h2>
     <div class="note">
@@ -349,7 +349,7 @@ function simulate(scheme,rule2){
   // 県の帰属：pm[元の県]＝現在の所属県。ルール⑤で県が吸収されるとpmだけが変わり、市町村の合併状態(frames)は変わらない
   const pm=Int16Array.from({length:N_PREF},(_,k)=>k), pms=[Int16Array.from(pm)], prefSkip=new Set();
   const curP=i=>pm[D.munis[i].pref];
-  // ルール⑤：市町村数が3未満になった県は、隣接県のうち県X（県内の主体のP・Iを合算して計算）が最も高い県に吸収される
+  // ルール⑤：市町村数が3未満になった県は、隣接県のうち県X（県内の主体のP・Iを合算して計算）が最小の県と合併し、2県のうちXが大きい方が残る（小さい方が吸収される）
   // 処理順はXが低い県から（ルール①と同じ）。吸収で連鎖的に条件を満たす県が出うるので、無くなるまで繰り返す
   function absorbPrefs(){
     if(!rule2) return;
@@ -365,9 +365,10 @@ function simulate(scheme,rule2){
       for(const i of alive) if(curP(i)===p) for(const j of nb[i]){ const r=find(j); if(alive.has(r)&&curP(r)!==p) adjP.add(curP(r)); }
       if(!adjP.size){ prefSkip.add(p); continue; }   // 陸・橋で隣接する県が無い（沖縄など）＝吸収先なし
       let q=-1, xq=0;
-      for(const a of adjP){ const x=computeX(scheme,sp[a],si[a]); if(q<0||x>xq){ q=a; xq=x; } }
-      for(let k=0;k<N_PREF;k++) if(pm[k]===p) pm[k]=q;
-      events.push({kind:"pref",p,q,n:cnt[p],Xp:xp,Xq:xq});
+      for(const a of adjP){ const x=computeX(scheme,sp[a],si[a]); if(q<0||x<xq){ q=a; xq=x; } }
+      const win=xp>xq?p:q, lose=xp>xq?q:p;   // 合併する2県のうちXが大きい方が残り、小さい方が吸収される
+      for(let k=0;k<N_PREF;k++) if(pm[k]===lose) pm[k]=win;
+      events.push({kind:"pref",p,q,win,lose,n:cnt[p],Xp:xp,Xq:xq});
       frames.push(frames[frames.length-1]); pms.push(Int16Array.from(pm));
     }
   }
@@ -578,8 +579,8 @@ function buildLog(){
     const ev=res.events[e], d=document.createElement("div");
     if(ev.kind==="pref"){
       d.className="warn";
-      d.textContent="【ルール⑤】"+D.prefs[ev.p]+"の市町村が"+ev.n+"（<"+MIN_MUNI_PER_PREF+"）→ 隣接県のうちXが最大の"+D.prefs[ev.q]+
-        "に吸収（県X "+fmtX(scheme,ev.Xp)+" → 吸収先 "+fmtX(scheme,ev.Xq)+"）";
+      d.textContent="【ルール⑤】"+D.prefs[ev.p]+"（市町村"+ev.n+"<"+MIN_MUNI_PER_PREF+", 県X "+fmtX(scheme,ev.Xp)+"）が隣接でX最小の"+D.prefs[ev.q]+
+        "（県X "+fmtX(scheme,ev.Xq)+"）と合併 → Xが大きい"+D.prefs[ev.win]+"が残り、"+D.prefs[ev.lose]+"が吸収される";
       frag.appendChild(d); continue;
     }
     const S=D.munis[ev.s], T=D.munis[ev.t], pmT=res.pms[e][T.pref];
@@ -599,7 +600,7 @@ function updateHud(){
   let t="<b>方式"+scheme+"</b>　統合 "+fi+" / "+n;
   if(fi>0){
     const ev=res.events[fi-1];
-    if(ev.kind==="pref") t+="　直近：<b>"+D.prefs[ev.p]+"</b> が "+D.prefs[ev.q]+" に吸収（ルール⑤）";
+    if(ev.kind==="pref") t+="　直近：<b>"+D.prefs[ev.lose]+"</b> が "+D.prefs[ev.win]+" に吸収（ルール⑤）";
     else t+="　直近："+D.munis[ev.s].name+" → <b>"+D.munis[ev.t].name+"</b>（"+D.prefs[res.pms[fi][D.munis[ev.t].pref]]+"）";
   }
   $("hud").innerHTML=t;
