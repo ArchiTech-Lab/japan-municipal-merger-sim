@@ -200,7 +200,7 @@ def main():
         m["p2050"] = round(est[m["name"]])
         m["i2050"] = round(per_capita * est[m["name"]])
         m["p2050_est"] = 1  # 簡易推定値の印（画面の注記用）
-    print(f"福島13市町村：2050年合計 {info['total_2050']:,.0f}人（IPSS県計−59市町村）、15〜64歳比 {info['ratio']:.3f}")
+    print(f"福島13市町村：2050年合計 {info['total_2050']:,.0f}人（IPSS県計−46市町村）、15〜64歳比 {info['ratio']:.3f}")
     for n in FUKUSHIMA_13:
         print(f"  {n}: 2026年15〜64歳 {info['w2026'][n]:,.0f} → 2050年 {est[n]:,.0f}（{info['src'][n]}）")
 
