@@ -35,6 +35,7 @@ X の作り方は4通り（A〜D）を切り替えられる。
 | | |
 |---|---|
 | `index.html` | 実データ版。**これ1つで完結する。**外部ライブラリ・外部通信なし |
+| `fukushuto/index.html` | 派生版「副首都要件×市町村合併」（2026-10）。副首都の指定要件案のうち①人口≥全国の1.2%・②経済規模≥全国の2.1%（課税対象所得で代理）だけを見て、弱者先行／強者先行の2通りで合併を続けた結果。要件の数値は報道ベース。デモ → https://architech-lab.github.io/japan-municipal-merger-sim/fukushuto/ |
 | `prototype.html` | 早期プロトタイプ（合成データ）。元データを落とさなくてもアルゴリズムの挙動を見られる |
 | `src/download.sh` | 元データの取得。国土数値情報・IPSS・総務省の公開URLのみ |
 | `src/build_real.py` | N03シェープファイル → `docs/gappei_real_data.js`（市町村の形・隣接） |
